@@ -2,86 +2,77 @@
 '''
 @author: Manuel F Martinez <manpaz@bashlinux.com>
 @organization: Bashlinux
-@copyright: Copyright (c) 2010 Bashlinux
+@copyright: Copyright (c) 2012 Bashlinux
 @license: GPL
 '''
 
-import usb.core
-import usb.util
 import Image
 import time
 
 from constants import *
 from exceptions import *
 
-class DeviceDescriptor:
-    """ Search device on USB tree and return it if found """
-    def __init__(self, idVendor, idProduct, interface) :
-        self.idVendor = idVendor
-        self.idProduct = idProduct
-        self.interface = interface
-
-    def get_device(self) :
-	device = usb.core.find(idVendor=self.idVendor, idProduct=self.idProduct)
-	return device
-
-class Escpos:
+class Escpos(object):
     """ ESC/POS Printer object """
-    handle    = None
     device    = None
     
-    inputEncoding = 'utf-8'
-    outputEncoding = 'ascii'
-    printingDisabled = False
-    
-    
-    codePageEncoding = {
-          CP_ENGLISH:  'ascii',      #PC437 (USA: Standard Europe)
-          CP_KATAKANA: 'euc_jp',     #Katakana    (Not sure. need to find someone how knows this)
-          CP_MULTILINGUAL: 'cp850',  #PC850 (Multilingual)
-          CP_PORTUGUESE: 'cp860',    #[PC860 (Portuguese)]
-          CP_FRENCH: 'cp863',        #PC863 (Canadian-French)
-          CP_NORDIC: 'cp865',        #PC865 (Nordic)
-          CP_WINDOWS: 'cp1252',      #WPC1252
-          CP_CYRILLIC: 'cp866',      #PC866 (Cyrillic #2)
-          CP_LATIN2: 'cp852',        #PC852 (Latin 2)
-          CP_EURO: 'cp858'           #PC858 (Euro)
-    }
+    """ ESC/POS Commands (Constants) """
 
-    def __init__(self, idVendor, idProduct, interface=0, in_ep=0x82, out_ep=0x01) :
-        self.idVendor  = idVendor
-        self.idProduct = idProduct
-        self.interface = interface
-        self.in_ep     = in_ep
-        self.out_ep    = out_ep
+    # Feed control sequences
+    CTL_LF    = '\x0a'             # Print and line feed
+    CTL_FF    = '\x0c'             # Form feed
+    CTL_CR    = '\x0d'             # Carriage return
+    CTL_HT    = '\x09'             # Horizontal tab
+    CTL_VT    = '\x0b'             # Vertical tab
+    # Printer hardware
+    HW_INIT   = '\x1b\x40'         # Clear data in buffer and reset modes
+    HW_SELECT = '\x1b\x3d\x01'     # Printer select
+    HW_RESET  = '\x1b\x3f\x0a\x00' # Reset printer hardware
+    # Cash Drawer
+    CD_KICK_2 = '\x1b\x70\x00'     # Sends a pulse to pin 2 [] 
+    CD_KICK_5 = '\x1b\x70\x01'     # Sends a pulse to pin 5 [] 
+    # Paper
+    PAPER_FULL_CUT  = '\x1d\x56\x00' # Full cut paper
+    PAPER_PART_CUT  = '\x1d\x56\x01' # Partial cut paper
+    # Text format   
+    TXT_NORMAL      = '\x1b\x21\x00' # Normal text
+    TXT_2HEIGHT     = '\x1b\x21\x10' # Double height text
+    TXT_2WIDTH      = '\x1b\x21\x20' # Double width text
+    TXT_UNDERL_OFF  = '\x1b\x2d\x00' # Underline font OFF
+    TXT_UNDERL_ON   = '\x1b\x2d\x01' # Underline font 1-dot ON
+    TXT_UNDERL2_ON  = '\x1b\x2d\x02' # Underline font 2-dot ON
+    TXT_BOLD_OFF    = '\x1b\x45\x00' # Bold font OFF
+    TXT_BOLD_ON     = '\x1b\x45\x01' # Bold font ON
+    TXT_FONT_A      = '\x1b\x4d\x00' # Font type A
+    TXT_FONT_B      = '\x1b\x4d\x01' # Font type B
+    TXT_ALIGN_LT    = '\x1b\x61\x00' # Left justification
+    TXT_ALIGN_CT    = '\x1b\x61\x01' # Centering
+    TXT_ALIGN_RT    = '\x1b\x61\x02' # Right justification
+    # Barcode format
+    BARCODE_TXT_OFF = '\x1d\x48\x00' # HRI barcode chars OFF
+    BARCODE_TXT_ABV = '\x1d\x48\x01' # HRI barcode chars above
+    BARCODE_TXT_BLW = '\x1d\x48\x02' # HRI barcode chars below
+    BARCODE_TXT_BTH = '\x1d\x48\x03' # HRI barcode chars both above and below
+    BARCODE_FONT_A  = '\x1d\x66\x00' # Font type A for HRI barcode chars
+    BARCODE_FONT_B  = '\x1d\x66\x01' # Font type B for HRI barcode chars
+    BARCODE_HEIGHT  = '\x1d\x68\x64' # Barcode Height [1-255]
+    BARCODE_WIDTH   = '\x1d\x77\x03' # Barcode Width  [2-6]
+    BARCODE_UPC_A   = '\x1d\x6b\x00' # Barcode type UPC-A
+    BARCODE_UPC_E   = '\x1d\x6b\x01' # Barcode type UPC-E
+    BARCODE_EAN13   = '\x1d\x6b\x02' # Barcode type EAN13
+    BARCODE_EAN8    = '\x1d\x6b\x03' # Barcode type EAN8
+    BARCODE_CODE39  = '\x1d\x6b\x04' # Barcode type CODE39
+    BARCODE_ITF     = '\x1d\x6b\x05' # Barcode type ITF
+    BARCODE_NW7     = '\x1d\x6b\x06' # Barcode type NW7
+    # Image format  
+    S_RASTER_N      = '\x1d\x76\x30\x00' # Set raster image normal size
+    S_RASTER_2W     = '\x1d\x76\x30\x01' # Set raster image double width
+    S_RASTER_2H     = '\x1d\x76\x30\x02' # Set raster image double height
+    S_RASTER_Q      = '\x1d\x76\x30\x03' # Set raster image quadruple
 
-
-        device_descriptor = DeviceDescriptor(self.idVendor, self.idProduct, self.interface)
-        self.device = device_descriptor.get_device()
-        if self.device is None:
-            raise DeviceError("Cable isn't plugged in")
-
-      	if self.device.is_kernel_driver_active(0):
-      		try:
-      			self.device.detach_kernel_driver(0)
-      		except usb.core.USBError as e:
-      			print "Could not detatch kernel driver: %s" % str(e)
-
-      	try:
-      		self.device.set_configuration()
-      		self.device.reset()
-      	except usb.core.USBError as e:
-            raise DeviceError("Could not set configuration: %s" % str(e))
-
-
-    def _raw(self, msg):
-        """ Print any of the commands above, or clear text """
-        if not self.printingDisabled:
-          self.device.write(self.out_ep, msg, self.interface)
-        
 
     def _check_image_size(self, size):
-        """Check and fix the size of the image to 32 bits"""
+        """ Check and fix the size of the image to 32 bits """
         if size % 32 == 0:
             return (0, 0)
         else:
@@ -93,13 +84,15 @@ class Escpos:
 
 
     def _print_image(self, line, size):
+        """ Print formatted image """
         i = 0
         cont = 0
         buffer = ""
+        output = list()
        
-        self._raw(S_RASTER_N)
+        output.append(self.S_RASTER_N)
         buffer = "%02X%02X%02X%02X" % (((size[0]/size[1])/8), 0, size[1], 0)
-        self._raw(buffer.decode('hex'))
+        output.append(buffer.decode('hex'))
         buffer = ""
 
         while i < len(line):
@@ -108,50 +101,15 @@ class Escpos:
             i += 8
             cont += 1
             if cont % 4 == 0:
-                self._raw(buffer.decode("hex"))
+                output.append(buffer.decode("hex"))
                 buffer = ""
                 cont = 0
+        if output:
+            self._raw(''.join(output))
 
-    def setInputEncoding(self, encoding):
-      '''Set the encoding your application is sending strings to the printer'''
-      self.inputEncoding = encoding
-      
-    def setOutputEncoding(self, encoding):
-      '''Set the encoding of the string being sent to the printer'''
-      self.outputEncoding = encoding
-      
-    def setPageCode(self, pageCode):
-      '''Send a Page Code command to the printer'''
-      self._raw(pageCode)
-      
-      
-      if pageCode in self.codePageEncoding:
-        self.outputEncoding = self.codePageEncoding[pageCode]
-
-      self._raw(pageCode)
-      
-
-    def disablePrinting(self):
-        """Don't send anything to the printer. Useful for debbuding purposes"""
-        self.printingDisabled = True
-        
-    def enablePrinting(self):
-        """Enables printing again."""
-        self.printingDisabled = True
-
-    def text(self, txt):
-        """ Print alpha-numeric text """
-        if txt:
-            self._raw(txt.encode(self.outputEncoding))
-        else:
-            raise TextError()
-
-    def textln(self, txt):
-        """Prints the text followed by a new line"""
-        self.text(txt + "\n")      
 
     def image(self, img):
-        """Parse image and then print it"""
+        """ Parse image and prepare it to a printable format """
         pixels   = []
         pix_line = ""
         im_left  = ""
@@ -202,124 +160,139 @@ class Escpos:
 
     def barcode(self, code, bc, width, height, pos, font):
         """ Print Barcode """
+        output = list()
         # Align Bar Code()
-        self._raw(TXT_ALIGN_CT)
+        output.append(self.TXT_ALIGN_CT)
         # Height
         if height >=2 or height <=6:
-            self._raw(BARCODE_HEIGHT)
-            # self._raw(chr(height))
+            output.append(self.BARCODE_HEIGHT)
         else:
             raise BarcodeSizeError()
         # Width
         if width >= 1 or width <=255:
-            self._raw(BARCODE_WIDTH)
-            # self._raw(chr(width))
+            output.append(self.BARCODE_WIDTH)
         else:
             raise BarcodeSizeError()
         # Font
         if font.upper() == "B":
-            self._raw(BARCODE_FONT_B)
+            output.append(self.BARCODE_FONT_B)
         else: # DEFAULT FONT: A
-            self._raw(BARCODE_FONT_A)
+            output.append(self.BARCODE_FONT_A)
         # Position
         if pos.upper() == "OFF":
-            self._raw(BARCODE_TXT_OFF)
+            output.append(self.BARCODE_TXT_OFF)
         elif pos.upper() == "BOTH":
-            self._raw(BARCODE_TXT_BTH)
+            output.append(self.BARCODE_TXT_BTH)
         elif pos.upper() == "ABOVE":
-            self._raw(BARCODE_TXT_ABV)
+            output.append(self.BARCODE_TXT_ABV)
         else:  # DEFAULT POSITION: BELOW 
-            self._raw(BARCODE_TXT_BLW)
+            output.append(self.BARCODE_TXT_BLW)
         # Type 
         if bc.upper() == "UPC-A":
-            self._raw(BARCODE_UPC_A)
+            output.append(self.BARCODE_UPC_A)
         elif bc.upper() == "UPC-E":
-            self._raw(BARCODE_UPC_E)
+            output.append(self.BARCODE_UPC_E)
         elif bc.upper() == "EAN13":
-            self._raw(BARCODE_EAN13)
+            output.append(self.BARCODE_EAN13)
         elif bc.upper() == "EAN8":
-            self._raw(BARCODE_EAN8)
+            output.append(self.BARCODE_EAN8)
         elif bc.upper() == "CODE39":
-            self._raw(BARCODE_CODE39)
+            output.append(self.BARCODE_CODE39)
         elif bc.upper() == "ITF":
-            self._raw(BARCODE_ITF)
+            output.append(self.BARCODE_ITF)
         elif bc.upper() == "NW7":
-            self._raw(BARCODE_NW7)
+            output.append(self.BARCODE_NW7)
         else:
             raise BarcodeTypeError()
         # Print Code
         if code:
-            self._raw(code)
+            output.append(code)
         else:
             raise exception.BarcodeCodeError()
+        if output:
+            self._raw(''.join(output))
+
+        
+    def text(self, txt):
+        """ Print alpha-numeric text """
+        if txt:
+            self._raw(txt)
+        else:
+            raise TextError()
 
 
-
-
-    def set(self, align='left', font='a', type='normal', width=1, height=1):
+    def set(self, align=None, font=None, type=None, width=None, height=None):
         """ Set text properties """
+        output = list()
         # Align
-        if align.upper() == "CENTER":
-            self._raw(TXT_ALIGN_CT)
-        elif align.upper() == "RIGHT":
-            self._raw(TXT_ALIGN_RT)
-        elif align.upper() == "LEFT":
-            self._raw(TXT_ALIGN_LT)
+        if align is not None:
+            if align.upper() == "CENTER":
+                output.append(self.TXT_ALIGN_CT)
+            elif align.upper() == "RIGHT":
+                output.append(self.TXT_ALIGN_RT)
+            elif align.upper() == "LEFT":
+                output.append(self.TXT_ALIGN_LT)
         # Font
-        if font.upper() == "B":
-            self._raw(TXT_FONT_B)
-        else:  # DEFAULT FONT: A
-            self._raw(TXT_FONT_A)
+        if font is not None:
+            if font.upper() == "B":
+                output.append(self.TXT_FONT_B)
+            else:  # DEFAULT FONT: A
+                output.append(self.TXT_FONT_A)
         # Type
-        if type.upper() == "B":
-            self._raw(TXT_BOLD_ON)
-            self._raw(TXT_UNDERL_OFF)
-        elif type.upper() == "U":
-            self._raw(TXT_BOLD_OFF)
-            self._raw(TXT_UNDERL_ON)
-        elif type.upper() == "U2":
-            self._raw(TXT_BOLD_OFF)
-            self._raw(TXT_UNDERL2_ON)
-        elif type.upper() == "BU":
-            self._raw(TXT_BOLD_ON)
-            self._raw(TXT_UNDERL_ON)
-        elif type.upper() == "BU2":
-            self._raw(TXT_BOLD_ON)
-            self._raw(TXT_UNDERL2_ON)
-        elif type.upper == "NORMAL":
-            self._raw(TXT_BOLD_OFF)
-            self._raw(TXT_UNDERL_OFF)
+        if type is not None:
+            if type.upper() == "B":
+                output.append(self.TXT_BOLD_ON)
+                output.append(self.TXT_UNDERL_OFF)
+            elif type.upper() == "U":
+                output.append(self.TXT_BOLD_OFF)
+                output.append(self.TXT_UNDERL_ON)
+            elif type.upper() == "U2":
+                output.append(self.TXT_BOLD_OFF)
+                output.append(self.TXT_UNDERL2_ON)
+            elif type.upper() == "BU":
+                output.append(self.TXT_BOLD_ON)
+                output.append(self.TXT_UNDERL_ON)
+            elif type.upper() == "BU2":
+                output.append(self.TXT_BOLD_ON)
+                output.append(self.TXT_UNDERL2_ON)
+            elif type.upper == "NORMAL":
+                output.append(self.TXT_BOLD_OFF)
+                output.append(self.TXT_UNDERL_OFF)
         # Width
-        if width == 2 and height != 2:
-            self._raw(TXT_NORMAL)
-            self._raw(TXT_2WIDTH)
-        elif height == 2 and width != 2:
-            self._raw(TXT_NORMAL)
-            self._raw(TXT_2HEIGHT)
-        elif height == 2 and width == 2:
-            self._raw(TXT_2WIDTH)
-            self._raw(TXT_2HEIGHT)
-        else: # DEFAULT SIZE: NORMAL
-            self._raw(TXT_NORMAL)
+        if width is not None and height is not None:
+            if width == 2 and height != 2:
+                output.append(self.TXT_NORMAL)
+                output.append(self.TXT_2WIDTH)
+            elif height == 2 and width != 2:
+                output.append(self.TXT_NORMAL)
+                output.append(self.TXT_2HEIGHT)
+            elif height == 2 and width == 2:
+                output.append(self.TXT_2WIDTH)
+                output.append(self.TXT_2HEIGHT)
+            else: # DEFAULT SIZE: NORMAL
+                output.append(self.TXT_NORMAL)
+        
+        if output:
+            self._raw(''.join(output))
 
 
     def cut(self, mode=''):
         """ Cut paper """
         # Fix the size between last line and cut
         # TODO: handle this with a line feed
-        self._raw("\n\n\n\n\n\n")
+        self._raw("\n\n\n\n")
         if mode.upper() == "PART":
-            self._raw(PAPER_PART_CUT)
+            self._raw(self.PAPER_PART_CUT)
         else: # DEFAULT MODE: FULL CUT
-            self._raw(PAPER_FULL_CUT)
+            self._raw(self.PAPER_FULL_CUT)
 
 
-    def cashdraw(self, pin):
+    def cashdraw(self, pin=2):
         """ Send pulse to kick the cash drawer """
         if pin == 2:
-            self._raw(CD_KICK_2)
+            self._raw(self.CD_KICK_2)
         elif pin == 5:
-            self._raw(CD_KICK_5)
+            self._raw(self.CD_KICK_5)
         else:
             raise CashDrawerError()
 
@@ -327,11 +300,11 @@ class Escpos:
     def hw(self, hw):
         """ Hardware operations """
         if hw.upper() == "INIT":
-            self._raw(HW_INIT)
+            self._raw(self.HW_INIT)
         elif hw.upper() == "SELECT":
-            self._raw(HW_SELECT)
+            self._raw(self.HW_SELECT)
         elif hw.upper() == "RESET":
-            self._raw(HW_RESET)
+            self._raw(self.HW_RESET)
         else: # DEFAULT: DOES NOTHING
             pass
 
@@ -339,43 +312,12 @@ class Escpos:
     def control(self, ctl):
         """ Feed control sequences """
         if ctl.upper() == "LF":
-            self._raw(CTL_LF)
+            self._raw(self.CTL_LF)
         elif ctl.upper() == "FF":
-            self._raw(CTL_FF)
+            self._raw(self.CTL_FF)
         elif ctl.upper() == "CR":
-            self._raw(CTL_CR)
+            self._raw(self.CTL_CR)
         elif ctl.upper() == "HT":
-            self._raw(CTL_HT)
+            self._raw(self.CTL_HT)
         elif ctl.upper() == "VT":
-            self._raw(CTL_VT)
-
-
-    def __del__(self):
-        """ Release device interface """
-        if self.handle:
-            try:
-                self.handle.releaseInterface()
-                self.handle.resetEndpoint(self.out_ep)
-                self.handle.reset()
-            except Exception, err:
-                print err
-            self.handle, self.device = None, None
-            # Give a chance to return the interface to the system
-            # The following message could appear if the application is executed 
-            # too fast twice or more times.
-            # 
-            # >> could not detach kernel driver from interface 0: No data available
-            # >> No interface claimed
-            time.sleep(1)
-            
-    def tab(self):
-        self.control("HT")
-
-    def setTabPositions(self, positions):
-        
-        cmd = CLT_TAB_POSITIONS
-        
-        for index, pos in enumerate(positions):
-            cmd +=chr(pos)
-            
-        self._raw(cmd+'\n')
+            self._raw(self.CTL_VT)
